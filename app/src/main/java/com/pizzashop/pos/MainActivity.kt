@@ -109,6 +109,7 @@ class MainActivity : Activity() {
         val path = when (screen) {
             SCREEN_ORDERS -> "/cashier.html?tab=orders"
             SCREEN_DELIVERY -> "/delivery.html"
+            SCREEN_RIDER -> "/rider.html"
             else -> return
         }
         loadedServer = server
@@ -264,5 +265,6 @@ class MainActivity : Activity() {
         const val EXTRA_SCREEN = "screen"
         const val SCREEN_ORDERS = "orders"
         const val SCREEN_DELIVERY = "delivery"
+        const val SCREEN_RIDER = "rider"   // Step 260: the rider's own screen
     }
 }

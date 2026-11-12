@@ -74,7 +74,7 @@ class SettingsActivity : Activity() {
         addPrinterRow(box, Prefs.ROLE_KITCHEN, "Kitchen printer (kitchen slips)")
 
         box.addView(title("Order ready alerts"))
-        box.addView(note("The phone makes a sound and vibrates when the kitchen marks an order ready, even when the app is closed (you must stay logged in)."))
+        box.addView(note("The phone makes a sound and vibrates when the kitchen marks an order ready, even when the app is closed (you must stay logged in). Riders: any choice except Off gives the rider alerts (a delivery given to you, ready to pick up, changed, taken off you or cancelled)."))
         alertSpinner = Spinner(this)
         alertSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, alertLabels)
         alertSpinner.setSelection(alertValues.indexOf(prefs.alertMode).coerceAtLeast(0))
