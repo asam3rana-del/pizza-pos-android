@@ -69,17 +69,25 @@ class AlertService : Service() {
             }
             try {
                 val server = Prefs.normalizeServer(prefs.server)
-                val url = if (since < 0) "$server/api/events?quiet=1" else "$server/api/events?since=$since&wait=25&quiet=1"
+                // Step 260: a rider's phone listens to his own news only (a rider may not read the staff alerts)
+                val path = if (prefs.sessionRole == "rider") "/api/rider/events" else "/api/events"
+                val url = if (since < 0) "$server$path?quiet=1" else "$server$path?since=$since&wait=25&quiet=1"
                 val c = URL(url).openConnection() as HttpURLConnection
                 try {
                     c.connectTimeout = 8000
                     c.readTimeout = 40000
                     c.setRequestProperty("Authorization", "Bearer " + prefs.sessionToken)
                     val code = c.responseCode
-                    if (code == 401 || code == 403) {
-                        // the login ended (or this role has no alerts): stop and let the person log in again
+                    if (code == 401) {
+                        // the login ended: stop and let the person log in again
                         prefs.clearSession()
                         notifyStopped()
+                        finishSelf()
+                        return
+                    }
+                    if (code == 403) {
+                        // Step 260 (bug fix): this role has no alerts. Stop quietly; the login is NOT removed
+                        // (before, a rider was logged out of the app by this)
                         finishSelf()
                         return
                     }
@@ -112,6 +120,10 @@ class AlertService : Service() {
     }
 
     private fun handle(prefs: Prefs, e: JSONObject) {
+        if (prefs.sessionRole == "rider") {
+            handleRider(prefs, e)
+            return
+        }
         when (e.optString("type")) {
             "order_ready" -> handleReady(prefs, e)
             "order_new" -> handleNew(prefs, e)
@@ -138,6 +150,27 @@ class AlertService : Service() {
             .setAutoCancel(true)
         applyAlertSound(builder)
         getSystemService(NotificationManager::class.java)?.notify(200000 + (e.optInt("id") % 100000), builder.build())
+    }
+
+    private fun rupees(v: Double): String = if (v == Math.floor(v)) v.toLong().toString() else String.format("%.2f", v)
+
+    /** Step 260: the rider's own news: a delivery given to him, ready to pick up, taken off him, cancelled or changed. */
+    private fun handleRider(prefs: Prefs, e: JSONObject) {
+        if (prefs.alertMode == Prefs.MODE_OFF) return
+        val no = e.optInt("order_no")
+        val address = e.optString("address", "").let { if (it == "null") "" else it }
+        val due = e.optDouble("due", 0.0)
+        val collect = if (due > 0.0) "collect Rs " + rupees(due) else "already paid"
+        when (e.optString("type")) {
+            "rider_assigned" -> {
+                val state = if (e.optBoolean("ready", false)) "Ready: pick it up" else "Kitchen still cooking"
+                show(RIDER_CHANNEL, e, "New delivery: order #$no", listOf(address, state, collect).filter { it.isNotEmpty() }.joinToString(" - "), MainActivity.SCREEN_RIDER)
+            }
+            "order_ready" -> show(RIDER_CHANNEL, e, "Order #$no is ready", "Pick it up from the counter", MainActivity.SCREEN_RIDER)
+            "rider_changed" -> show(RIDER_CHANNEL, e, "Order #$no changed", listOf(address, collect).filter { it.isNotEmpty() }.joinToString(" - "), MainActivity.SCREEN_RIDER)
+            "rider_unassigned" -> show(RIDER_CHANNEL, e, "Order #$no taken off you", "It is no longer your delivery", MainActivity.SCREEN_RIDER)
+            "rider_cancelled" -> show(RIDER_CHANNEL, e, "Order #$no CANCELLED", "Do not deliver it", MainActivity.SCREEN_RIDER)
+        }
     }
 
     /** A new order from somebody else (the order you took yourself needs no alert). Cashier and manager by default (Step 23). */
@@ -226,6 +259,7 @@ class AlertService : Service() {
         val code = when (screen) {
             MainActivity.SCREEN_ORDERS -> 1
             MainActivity.SCREEN_DELIVERY -> 2
+            MainActivity.SCREEN_RIDER -> 3
             else -> 0
         }
         return PendingIntent.getActivity(this, code, i, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -260,6 +294,10 @@ class AlertService : Service() {
         delivery.enableVibration(true)
         delivery.description = "A failed delivery, or a rider's cash that is waiting to be collected"
         manager.createNotificationChannel(delivery)
+        val rider = NotificationChannel(RIDER_CHANNEL, "My deliveries (rider)", NotificationManager.IMPORTANCE_HIGH)
+        rider.enableVibration(true)
+        rider.description = "A delivery given to you, ready to pick up, changed, taken off you or cancelled"
+        manager.createNotificationChannel(rider)
         val waiting = NotificationChannel(WAITING_CHANNEL, "Alerts are running", NotificationManager.IMPORTANCE_LOW)
         waiting.description = "Shows that the phone is waiting for order alerts"
         manager.createNotificationChannel(waiting)
@@ -269,6 +307,7 @@ class AlertService : Service() {
         private const val READY_CHANNEL = "order_ready"
         private const val NEW_CHANNEL = "order_new"
         private const val DELIVERY_CHANNEL = "delivery_news"
+        private const val RIDER_CHANNEL = "rider_news"
         private const val WAITING_CHANNEL = "alerts_running"
         private const val FOREGROUND_ID = 41
         private const val STOPPED_ID = 42
